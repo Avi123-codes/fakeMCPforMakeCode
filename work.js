@@ -34,6 +34,16 @@
   +'    <button id="save" style="padding:10px;border:none;border-radius:8px;background:#16a34a;color:#fff;font-weight:600;cursor:pointer">Save Key</button>'
   +'  </div>'
   +'</div>'
+  +'<div id="fb" style="display:none;margin:12px;margin-top:0;padding:12px;border-radius:10px;background:linear-gradient(135deg,#1b2441,#101a33);border:1px solid #354b7d;box-shadow:0 4px 18px rgba(0,0,0,.3);">'
+  +'  <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">'
+  +'    <div style="font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#8fb7ff;display:flex;align-items:center;gap:6px;">'
+  +'      <span style="display:inline-flex;width:16px;height:16px;align-items:center;justify-content:center;border-radius:50%;background:#3b82f6;color:#0b1020;font-weight:700;font-size:10px;">i</span>'
+  +'      Model Feedback'
+  +'    </div>'
+  +'    <button id="fbToggle" aria-label="Toggle feedback" style="background:rgba(148,163,255,0.15);color:#cdd9ff;border:1px solid rgba(148,163,255,0.3);border-radius:16px;padding:2px 10px;font-size:11px;font-weight:500;cursor:pointer;">Hide</button>'
+  +'  </div>'
+  +'  <div id="fbLines" style="display:grid;gap:6px;font-size:12px;color:#e4ecff;line-height:1.35;"></div>'
+  +'</div>'
   +'<div id="log" style="padding:10px 12px;font-size:11px;color:#9bb1dd;display:block;max-height:200px;overflow:auto"></div>'
   +'<div id="rz" style="position:absolute;width:14px;height:14px;right:2px;bottom:2px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,#2b3a5a 50%);opacity:.9"></div>';
   document.body.appendChild(ui);
@@ -43,11 +53,60 @@
   const hdr=$('#h'), statusEl=$('#status'), closeBtn=$('#x'), resizer=$('#rz');
   const prov=$('#prov'), key=$('#key'), model=$('#model'), tgtSel=$('#target'), inc=$('#inc');
   const promptEl=$('#p'), go=$('#go'), revertBtn=$('#revert'), log=$('#log'), save=$('#save');
+  const feedbackBox=$('#fb'), feedbackLines=$('#fbLines'), feedbackToggle=$('#fbToggle');
   let __lastCode='';      // hidden last result
   let __undoStack=[];     // snapshots before paste
   const setStatus=(t)=>statusEl.textContent=t;
   const logLine=(t)=>{ const d=document.createElement('div'); d.textContent=t; log.appendChild(d); log.scrollTop=log.scrollHeight; };
   const clearLog=()=>{ log.innerHTML=''; };
+  let feedbackCollapsed=false;
+  const applyFeedbackCollapse=()=>{
+    if(!feedbackBox || !feedbackLines || !feedbackToggle) return;
+    if(feedbackCollapsed){
+      feedbackLines.style.display='none';
+      feedbackToggle.textContent='Show';
+      feedbackToggle.setAttribute('aria-expanded','false');
+      feedbackBox.style.paddingBottom='8px';
+    }else{
+      feedbackLines.style.display='grid';
+      feedbackToggle.textContent='Hide';
+      feedbackToggle.setAttribute('aria-expanded','true');
+      feedbackBox.style.paddingBottom='12px';
+    }
+  };
+  const renderFeedback=(items)=>{
+    if(!feedbackBox || !feedbackLines) return;
+    feedbackLines.innerHTML='';
+    const list=(items||[]).filter(x=>x&&x.trim());
+    if(!list.length){
+      feedbackCollapsed=false;
+      feedbackBox.style.display='none';
+      feedbackBox.setAttribute('aria-hidden','true');
+      if(feedbackToggle) feedbackToggle.style.visibility='hidden';
+      return;
+    }
+    list.forEach(msg=>{
+      const bubble=document.createElement('div');
+      bubble.textContent=msg.trim();
+      bubble.style.cssText='padding:8px 10px;border-left:3px solid #3b82f6;border-radius:6px;background:rgba(59,130,246,0.14);color:#f1f5ff;';
+      feedbackLines.appendChild(bubble);
+    });
+    feedbackCollapsed=false;
+    if(feedbackToggle){
+      feedbackToggle.style.visibility='visible';
+    }
+    feedbackBox.style.display='block';
+    feedbackBox.setAttribute('aria-hidden','false');
+    applyFeedbackCollapse();
+  };
+  if(feedbackToggle){
+    feedbackToggle.style.visibility='hidden';
+    feedbackToggle.onclick=function(){
+      if(!feedbackBox || feedbackBox.style.display==='none') return;
+      feedbackCollapsed=!feedbackCollapsed;
+      applyFeedbackCollapse();
+    };
+  }
   
   /* ==== Monaco helpers ==== */
   const clickLike=(root,labels)=>{
@@ -370,7 +429,8 @@
   let busy=false;
   go.onclick=function(){
     if(busy) return; busy=true;
-    clearLog(); setStatus('Working'); logLine('Generating…');
+    clearLog(); renderFeedback([]);
+    setStatus('Working'); logLine('Generating…');
     const apiKey=key.value.trim(); if(!apiKey){ alert('Enter API key'); busy=false; return; }
     const req=promptEl.value.trim(); if(!req){ setStatus('Idle'); logLine('Please enter a request.'); busy=false; return; }
     const provider=prov.value, mdl=model.value.trim(), t=tgtSel.value.trim();
@@ -385,9 +445,7 @@
       return askValidated(provider, apiKey, mdl, sys, user, t);
     }).then(result=>{
       const feedback=(result && Array.isArray(result.feedback))?result.feedback:[];
-      if(feedback.length){
-        feedback.forEach(msg=>{ if(msg) logLine('Feedback: '+msg); });
-      }
+      renderFeedback(feedback);
       __lastCode = (result && result.code) || '';
       if(!__lastCode){ setStatus('No code'); logLine('No code returned.'); busy=false; return; }
       setStatus('Pasting');
