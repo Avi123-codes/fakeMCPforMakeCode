@@ -9,7 +9,7 @@
 // @run-at       document-idle
 // ==/UserScript==
 
-const BACKEND = "http://localhost:8787";
+const BACKEND = "http://mcai.dev.tk.sg";
 const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
 
 (function () {
