@@ -1,15 +1,15 @@
 // ==UserScript==
-// @name         MakeCode AI (polished, toggle + auto-apply + drag-pick)
+// @name         MakeCode AI (polished, toggle + auto-apply + drag-pick + safe-drag)
 // @namespace    mcai.local
-// @version      0.4
-// @description  Better UX: launcher toggle, Alt+M, auto-apply engine, drag to pick
+// @version      0.5
+// @description  Launcher drag w/out accidental open, smooth animations, no layout gaps, draggable+resizable panel
 // @match        https://makecode.microbit.org/*
 // @match        https://arcade.makecode.com/*
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
-const BACKEND = "http://mcai.dev.tk.sg";
+const BACKEND = "https://mcai.dev.tk.sg";
 const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
 
 (function () {
@@ -17,7 +17,7 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
   window.__mcBlocksStrict = 1;    // keep one instance
   const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // ---------- launcher (always present) ----------
+  // ---------- launcher (always present + draggable, no accidental open) ----------
   const launcher = document.createElement('button');
   launcher.id = 'mcai-launcher';
   launcher.title = 'MakeCode AI (Alt+M)';
@@ -25,21 +25,72 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
     position:fixed; right:18px; bottom:18px; z-index:2147483647;
     width:44px; height:44px; border-radius:12px; border:1px solid rgba(125,225,255,.25);
     background:linear-gradient(135deg,#2c3c7a,#16244f); color:#eaf2ff; font-weight:800;
-    box-shadow:0 8px 24px rgba(0,0,0,.45); cursor:pointer; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 8px 24px rgba(0,0,0,.45); cursor:grab; display:flex; align-items:center; justify-content:center;
+    transition: transform .15s ease, box-shadow .15s ease;
   `;
   launcher.textContent = 'AI';
   document.body.appendChild(launcher);
 
-  // ---------- panel ----------
+  // drag without opening
+  (function enableLauncherDrag() {
+    let dragging = false, moved = false;
+    let ox = 0, oy = 0, sx = 0, sy = 0;
+    const CLICK_SLOP = 6; // px
+
+    launcher.addEventListener('mousedown', (e) => {
+      dragging = true; moved = false;
+      launcher.style.cursor = 'grabbing';
+      ox = e.clientX; oy = e.clientY;
+      const r = launcher.getBoundingClientRect(); sx = r.left; sy = r.top;
+      document.body.style.userSelect = 'none';
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - ox, dy = e.clientY - oy;
+      if (Math.abs(dx) > CLICK_SLOP || Math.abs(dy) > CLICK_SLOP) moved = true;
+      const nx = Math.max(8, Math.min(window.innerWidth - launcher.offsetWidth - 8, sx + dx));
+      const ny = Math.max(8, Math.min(window.innerHeight - launcher.offsetHeight - 8, sy + dy));
+      launcher.style.left = nx + 'px';
+      launcher.style.top  = ny + 'px';
+      launcher.style.right = 'auto';
+      launcher.style.bottom = 'auto';
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (!dragging) return;
+      dragging = false;
+      launcher.style.cursor = 'grab';
+      document.body.style.userSelect = '';
+      // Only open if it was a real click (no movement)
+      if (!moved) togglePanel();
+    });
+
+    // prevent click while dragging from firing
+    launcher.addEventListener('click', (e) => {
+      // If mouseup already opened via no-move, suppress extra click.
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  })();
+
+  // ---------- panel (fixed, no max-height; animations; no layout gap) ----------
   const ui = document.createElement('div');
   ui.setAttribute('role', 'dialog');
   ui.setAttribute('aria-label', 'MakeCode AI Panel');
-  ui.style.cssText = 'position:fixed;right:16px;bottom:16px;width:480px;max-width:calc(100vw - 24px);max-height:85vh;z-index:2147483647;display:flex;flex-direction:column;';
+  // keep it fully fixed so it never affects page layout (no 'gap')
+  ui.style.cssText = `
+    position:fixed; right:16px; bottom:16px; z-index:2147483647;
+    width:520px; max-width:calc(100vw - 24px);
+    height:520px; /* no max-height cap */
+    display:none; flex-direction:column; pointer-events:auto;
+    transform: scale(.98); opacity: 0; transition: transform .18s ease, opacity .18s ease;
+  `;
   const css = document.createElement('style');
   css.textContent = `
     .mcai-card { background: linear-gradient(180deg, #0e1428 0%, #0a1020 100%); border: 1px solid rgba(89,123,255,.15);
       border-radius: 14px; box-shadow: 0 12px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.03);
-      color: #e6eaf7; font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; overflow: hidden; backdrop-filter: blur(6px); }
+      color: #e6eaf7; font: 13px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; overflow: hidden; }
     .mcai-header { display:flex;align-items:center;gap:10px; padding:12px 14px;
       background: linear-gradient(180deg, rgba(22,30,58,.7), rgba(16,22,45,.7)); border-bottom: 1px solid rgba(89,123,255,.15);
       cursor: move; user-select:none; }
@@ -48,10 +99,10 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
       box-shadow: 0 2px 12px rgba(93,131,255,.45); }
     .mcai-title { font-weight:700;font-size:13px; letter-spacing:.2px }
     .mcai-status { margin-left:auto; font-size:11px; color:#a9b7ff; padding:3px 8px;border-radius:999px;
-      background:rgba(89,123,255,.12); border:1px solid rgba(89,123,255,.22); }
+      background:rgba(89,123,255,.12); border:1px solid rgba(89,123,255,.22); white-space:nowrap; }
     .mcai-close { margin-left:8px;background:transparent;border:none;color:#b8c2ff; font-size:16px;line-height:1;cursor:pointer;border-radius:8px;padding:4px 6px; }
     .mcai-close:hover { background:rgba(255,255,255,.06); color:#fff }
-    .mcai-body { padding:12px 14px; display:grid; gap:10px; }
+    .mcai-body { position:absolute; inset:48px 0 0 0; padding:12px 14px; display:grid; gap:10px; overflow:auto; }
     .mcai-section { display:grid; gap:8px; padding:10px; border:1px solid rgba(120,148,255,.15); border-radius:12px;
       background: linear-gradient(180deg, rgba(18,24,48,.65), rgba(12,18,36,.65)); }
     .mcai-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -76,14 +127,19 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
     .mcai-fb-toggle { background:rgba(148,163,255,.12); color:#d7e1ff; border:1px solid rgba(148,163,255,.32); border-radius:999px; padding:4px 10px; font-size:11px; cursor:pointer; }
     .mcai-fb-lines { display:grid; gap:6px; }
     .mcai-fb-bubble { padding:8px 10px; border-left:3px solid #3b82f6; border-radius:8px; background:rgba(59,130,246,.16); color:#f1f6ff; }
-    .mcai-log { padding:10px 12px; font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Roboto Mono", monospace; color:#a9b7ff; background:#0c1230; border-top:1px solid rgba(120,148,255,.18); max-height:180px; overflow:auto; scrollbar-width: thin; border-radius: 0 0 14px 14px; }
-    .mcai-resize { position:absolute; width:16px; height:16px; right:8px; bottom:8px; cursor:nwse-resize; opacity:.85;
+    .mcai-log { position:absolute; left:14px; right:14px; bottom:14px; height:140px; box-sizing:border-box;
+      padding:10px 12px; font:12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Roboto Mono", monospace;
+      color:#a9b7ff; background:#0c1230; border:1px solid rgba(120,148,255,.18); border-radius:10px; overflow:auto; scrollbar-width: thin; }
+    .mcai-resize { position:absolute; width:16px; height:16px; right:8px; bottom:8px; cursor:nwse-resize; opacity:.9; z-index:2;
       background: linear-gradient(135deg,transparent 52%, rgba(125,225,255,.35) 52% 60%, transparent 0) no-repeat,
                   linear-gradient(135deg,transparent 62%, rgba(125,225,255,.25) 62% 70%, transparent 0) no-repeat,
                   linear-gradient(135deg,transparent 72%, rgba(125,225,255,.18) 72% 80%, transparent 0) no-repeat; background-size: 100% 100%, 100% 100%, 100% 100%; }
+    .mcai-show { display:flex !important; transform: scale(1) !important; opacity: 1 !important; }
   `;
   const card = document.createElement('div');
   card.className = 'mcai-card';
+  card.style.cssText = 'position:absolute; inset:0;'; // fill ui; prevents layout gaps
+
   const header = document.createElement('div');
   header.className = 'mcai-header';
   header.innerHTML = `
@@ -92,6 +148,7 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
     <span id="status" class="mcai-status">Idle</span>
     <button id="mcai-close" class="mcai-close" title="Hide panel">✕</button>
   `;
+
   const body = document.createElement('div');
   body.className = 'mcai-body';
   body.innerHTML = `
@@ -99,7 +156,7 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
       <div class="mcai-label">Engine</div>
       <div class="mcai-row">
         <select id="engine" class="mcai-select"><option>Loading…</option></select>
-        <!-- removed Use button: auto-apply below -->
+        <!-- auto-apply -->
       </div>
     </div>
 
@@ -124,6 +181,7 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
       </div>
     </div>
   `;
+
   const feedbackWrap = document.createElement('div');
   feedbackWrap.className = 'mcai-feedback';
   feedbackWrap.innerHTML = `
@@ -135,18 +193,81 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
       <div id="fbLines" class="mcai-fb-lines"></div>
     </div>
   `;
+
   const log = document.createElement('div');
   log.id = 'log'; log.className = 'mcai-log';
+
   const rz = document.createElement('div'); rz.id = 'rz'; rz.className = 'mcai-resize';
 
-  card.appendChild(header); card.appendChild(body);
-  ui.appendChild(css); ui.appendChild(card); ui.appendChild(feedbackWrap); ui.appendChild(log); ui.appendChild(rz);
+  card.appendChild(header);
+  card.appendChild(body);
+  ui.appendChild(css);
+  ui.appendChild(card);
+  ui.appendChild(feedbackWrap);
+  ui.appendChild(log);
+  ui.appendChild(rz);
   document.body.appendChild(ui);
   window.__mcAIPanel = ui;
 
-  // ---------- refs ----------
+  // ---------- show/hide with animations ----------
+  function showPanel() { ui.classList.add('mcai-show'); launcher.style.display = 'none'; }
+  function hidePanel() { ui.classList.remove('mcai-show'); setTimeout(() => { ui.style.display = 'none'; launcher.style.display = 'flex'; }, 180); }
+  function togglePanel() { if (ui.style.display === 'none' || !ui.classList.contains('mcai-show')) { ui.style.display = 'flex'; requestAnimationFrame(() => ui.classList.add('mcai-show')); } else { hidePanel(); } }
+
+  // open on install by default
+  ui.style.display = 'flex'; requestAnimationFrame(() => ui.classList.add('mcai-show'));
+
+  // Alt+M toggles
+  window.addEventListener('keydown', (e) => {
+    if (e.altKey && (e.key.toLowerCase() === 'm')) {
+      togglePanel();
+    }
+  });
+
+  // close button
   const $ = (s) => ui.querySelector(s);
   const statusEl = $('#status'), closeBtn = $('#mcai-close'), resizer = $('#rz');
+  closeBtn.onclick = hidePanel;
+
+  // ---------- drag panel by header ----------
+  (function () {
+    let ox = 0, oy = 0, sx = 0, sy = 0, drag = false;
+    header.addEventListener('mousedown', (e) => {
+      drag = true; ox = e.clientX; oy = e.clientY;
+      const r = ui.getBoundingClientRect(); sx = r.left; sy = r.top;
+      document.body.style.userSelect = 'none';
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!drag) return;
+      const nx = Math.max(8, Math.min(window.innerWidth - 40, sx + (e.clientX - ox)));
+      const ny = Math.max(8, Math.min(window.innerHeight - 40, sy + (e.clientY - oy)));
+      ui.style.left = nx + 'px';
+      ui.style.top  = ny + 'px';
+      ui.style.right = 'auto';
+      ui.style.bottom = 'auto';
+    });
+    window.addEventListener('mouseup', () => { drag = false; document.body.style.userSelect = ''; });
+  })();
+
+  // ---------- resize (resizer stays visible) ----------
+  (function () {
+    let rx = 0, ry = 0, startW = 0, startH = 0, res = false;
+    resizer.addEventListener('mousedown', (e) => {
+      res = true; rx = e.clientX; ry = e.clientY; startW = ui.offsetWidth; startH = ui.offsetHeight;
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!res) return;
+      const w = Math.max(420, startW + (e.clientX - rx));
+      const h = Math.max(300, startH + (e.clientY - ry));
+      ui.style.width = w + 'px';
+      ui.style.height = h + 'px';
+    });
+    window.addEventListener('mouseup', () => { res = false; document.body.style.userSelect = ''; });
+  })();
+
+  // ---------- refs ----------
   const engine = $('#engine'), tgtSel = $('#target'), inc = $('#inc');
   const promptEl = $('#p'), go = $('#go'), revertBtn = $('#revert');
   const feedbackBox = feedbackWrap, feedbackLines = $('#fbLines'), feedbackToggle = $('#fbToggle');
@@ -156,20 +277,6 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
   const logLine = (t) => { const d = document.createElement('div'); d.textContent = t; log.appendChild(d); log.scrollTop = log.scrollHeight; };
   const clearLog = () => { log.innerHTML = ''; };
 
-  // ---------- show/hide / launcher / hotkey ----------
-  function showPanel() { ui.style.display = 'flex'; launcher.style.display = 'none'; }
-  function hidePanel() { ui.style.display = 'none'; launcher.style.display = 'flex'; }
-  launcher.onclick = showPanel;
-  closeBtn.onclick = hidePanel;
-  // open on install by default
-  showPanel();
-  // Alt+M toggles
-  window.addEventListener('keydown', (e) => {
-    if (e.altKey && (e.key.toLowerCase() === 'm')) {
-      if (ui.style.display === 'none') showPanel(); else hidePanel();
-    }
-  });
-
   // ---------- feedback ----------
   let feedbackCollapsed = false;
   const applyFeedbackCollapse = () => {
@@ -178,12 +285,12 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
   };
   const renderFeedback = (items = []) => {
     feedbackLines.innerHTML = '';
-    const list = items.filter(x => x && x.trim());
+    const list = items.filter(x => x && x.trim && x.trim());
     if (!list.length) {
       feedbackCollapsed = false; feedbackBox.style.display = 'none'; feedbackToggle.style.visibility = 'hidden'; return;
     }
     list.forEach(msg => {
-      const b = document.createElement('div'); b.className = 'mcai-fb-bubble'; b.textContent = msg.trim(); feedbackLines.appendChild(b);
+      const b = document.createElement('div'); b.className = 'mcai-fb-bubble'; b.textContent = String(msg).trim(); feedbackLines.appendChild(b);
     });
     feedbackToggle.style.visibility = 'visible'; feedbackBox.style.display = 'block'; feedbackCollapsed = false; applyFeedbackCollapse();
   };
@@ -275,10 +382,10 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
   // ---------- main action ----------
   go.onclick = function () {
     if (busy) return; busy = true;
-    clearLog(); renderFeedback([]);
+    log.innerHTML = ''; renderFeedback([]);
     setStatus('Working'); logLine('Generating…');
 
-    const req = promptEl.value.trim(); if (!req) { setStatus('Idle'); logLine('Please enter a request.'); busy = false; return; }
+    const req = (promptEl.value || '').trim(); if (!req) { setStatus('Idle'); logLine('Please enter a request.'); busy = false; return; }
     const t = tgtSel.value.trim();
 
     const origText = go.textContent; go.textContent = 'Loading…'; go.disabled = true;
@@ -325,17 +432,4 @@ const APP_TOKEN = ""; // fill ONLY if you set SERVER_APP_TOKEN
       if (__undoStack.length) revertBtn.disabled = false;
     });
   };
-
-  // drag window
-  (function () { let ox = 0, oy = 0, sx = 0, sy = 0, drag = false;
-    header.addEventListener('mousedown', (e) => { drag = true; ox = e.clientX; oy = e.clientY; const r = ui.getBoundingClientRect(); sx = r.left; sy = r.top; document.body.style.userSelect = 'none'; });
-    window.addEventListener('mousemove', (e) => { if (!drag) return; const nx = sx + (e.clientX - ox), ny = sy + (e.clientY - oy); ui.style.left = Math.max(8, Math.min(window.innerWidth - 40, nx)) + 'px'; ui.style.top = Math.max(8, Math.min(window.innerHeight - 40, ny)) + 'px'; ui.style.right = 'auto'; ui.style.bottom = 'auto'; });
-    window.addEventListener('mouseup', () => { drag = false; document.body.style.userSelect = ''; });
-  })();
-  // resize
-  (function () { let rx = 0, ry = 0, startW = 0, startH = 0, res = false;
-    resizer.addEventListener('mousedown', (e) => { res = true; rx = e.clientX; ry = e.clientY; startW = ui.offsetWidth; startH = ui.offsetHeight; document.body.style.userSelect = 'none'; });
-    window.addEventListener('mousemove', (e) => { if (!res) return; const w = Math.max(420, startW + (e.clientX - rx)), h = Math.max(300, startH + (e.clientY - ry)); ui.style.width = w + 'px'; ui.style.height = h + 'px'; });
-    window.addEventListener('mouseup', () => { res = false; document.body.style.userSelect = ''; });
-  })();
 })();
